@@ -1,0 +1,59 @@
+name: Build
+on:
+  schedule:
+    - cron: "23 12 * * *"
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/build.yml
+      - patches/**
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UPSTREAM_REPO: peripheryapp/periphery
+
+jobs:
+  build:
+    name: Build periphery
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Clone Upstream
+        run: git clone --depth=1 "https://github.com/${{ env.UPSTREAM_REPO }}.git" upstream
+
+      - name: Apply Patches
+        run: |
+          shopt -s nullglob
+          patches=(patches/*.patch)
+          if ((${#patches[@]} == 0)); then
+            exit 0
+          fi
+          git -C upstream apply --verbose "${patches[@]}"
+
+      - name: Resolve Dependencies
+        working-directory: upstream
+        run: swift package resolve
+
+      - name: Build
+        working-directory: upstream
+        run: swift build -c release --product periphery
+
+      - name: Verify Binary
+        working-directory: upstream
+        run: .build/release/periphery version
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: periphery
+          path: upstream/.build/release/periphery
+          retention-days: 7
